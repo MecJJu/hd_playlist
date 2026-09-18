@@ -817,6 +817,7 @@ body.select-mode .shelf-item.selected .shelf-cover img {
   box-shadow: 0 4px 12px rgba(80,70,150,0.45), 0 2px 5px rgba(80,70,150,0.3), inset 0 1px 0 rgba(255,255,255,0.9);
   transform:translate(-50%,-50%);
   cursor:pointer;
+  touch-action: none;
 }
 body.dark-mode #progressHandle {
   background: #ffffff;
@@ -1131,6 +1132,38 @@ body.dark-mode #helpOverlay {
   color: var(--ink-dim); /* 제작자 표시는 항상 무채색 */
 }
 
+
+/* --- 모바일/좁은 화면 대응 ---
+   PC 기준 레이아웃(앨범 320px + 가사/비주얼라이저 가로 배치)은 폰에서 오른쪽 컬럼 폭이 0이 되어
+   가사창과 비주얼라이저가 통째로 사라졌음. 좁은 화면에서는 세로로 쌓아서 해결 */
+@media (max-width: 760px) {
+  /* 상단 고정 버튼(top:20px, 높이 40px)이 앨범 이미지를 가리지 않도록 위쪽 여백을 넉넉히 */
+  .container { gap: 28px; padding: 80px 16px 40px; }
+  .top-row {
+    flex-direction: column;
+    align-items: center;
+    height: auto;   /* PC에서는 334px 고정이지만 세로 배치에서는 내용 높이에 맞춤 */
+    gap: 20px;
+  }
+  #albumImage {
+    width: min(320px, 70vw);
+    height: min(320px, 70vw);
+  }
+  .right-side {
+    width: 100%;
+    flex: none;
+    height: 300px;  /* 세로 배치에서는 높이를 직접 지정해야 가사창(3줄)+비주얼라이저(70px)가 자리를 얻음 */
+  }
+}
+
+/* 터치 기기: 재생바 핸들(16px)이 손가락으로 잡기엔 작아서 보이지 않는 터치 영역만 넓혀줌 */
+@media (pointer: coarse) {
+  #progressHandle::before {
+    content: '';
+    position: absolute;
+    inset: -14px;
+  }
+}
 </style>
 </head>
 
@@ -2104,7 +2137,7 @@ function initAudioAnalyser() {
 }
 
 function roundRectPath(ctx, x, y, w, h, r) {
-  const radius = Math.min(r, w / 2, h / 2);
+  const radius = Math.max(0, Math.min(r, w / 2, h / 2));
   ctx.beginPath();
   ctx.moveTo(x + radius, y);
   ctx.arcTo(x + w, y, x + w, y + h, radius);
@@ -2267,6 +2300,14 @@ const RESPONSE_CURVE = 7.5;
 let didLogFirstDraw = false;
 function drawVisualizer() {
   const canvas = el('visualizerCanvas');
+  // 선반 화면처럼 캔버스가 아직 화면에 없을 때는 캔버스 크기가 기본값(300x150)이라
+  // 모바일(dpr 2~3)에서는 w = 300/dpr 가 너무 작아져 막대 폭이 음수가 되고, arcTo가 예외를 던지면서
+  // 아래의 requestAnimationFrame까지 도달하지 못해 그리기 루프가 영구히 멈췄음(모바일에서만 비주얼라이저가 죽던 진짜 원인).
+  // 보이지 않는 동안은 그리기를 건너뛰고 루프만 유지함
+  if (canvas.clientWidth === 0 || canvas.clientHeight === 0) {
+    requestAnimationFrame(drawVisualizer);
+    return;
+  }
   const dpr = window.devicePixelRatio || 1;
   const ctx = canvas.getContext('2d');
   const w = canvas.width / dpr;
@@ -2279,7 +2320,7 @@ function drawVisualizer() {
 
   const barCount = VISUAL_BAR_COUNT;
   const gap = barCount > 100 ? 2 : 3;
-  const barWidth = (w - gap * (barCount - 1)) / barCount;
+  const barWidth = Math.max(0.5, (w - gap * (barCount - 1)) / barCount);
 
   if (analyser && isPlaying) {
     analyser.getByteFrequencyData(freqData);
@@ -2825,9 +2866,10 @@ el('progressBar').onclick = e => {
   updateLyricsManual(seekTime);
 };
 
-el('progressHandle').onmousedown = () => isDragging = true;
-window.onmouseup = () => isDragging = false;
-window.onmousemove = e => {
+el('progressHandle').onpointerdown = e => { isDragging = true; e.preventDefault(); };
+window.onpointerup = () => isDragging = false;
+window.onpointercancel = () => isDragging = false;
+window.onpointermove = e => {
   if (!isDragging || isNaN(audio.duration)) return;
   const r = el('progressBar').getBoundingClientRect();
   let p = (e.clientX - r.left) / r.width;
